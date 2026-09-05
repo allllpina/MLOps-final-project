@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  # --- SEAWEEDFS (ALL-IN-ONE SERVER) ---
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: seaweedfs_server
+    ports:
+      - "9333:9333"
+      - "8333:8333"
+    command: "server -s3 -dir=/tmp"
+    restart: always
+
+  seaweedfs-init:
+      image: amazon/aws-cli
+      container_name: seaweedfs_init
+      environment:
+        AWS_ACCESS_KEY_ID: "weedadmin"
+        AWS_SECRET_ACCESS_KEY: "weedadmin123"
+        AWS_DEFAULT_REGION: "us-east-1"
+      volumes:
+        - ./data:/tmp/data:ro
+      entrypoint: /bin/sh
+      command: >
+        -c "
+        aws configure set default.s3.addressing_style path;
+        echo 'Очікування повної ініціалізації SeaweedFS S3 шлюзу...';
+        sleep 10;
+        echo 'Створюємо бакети...';
+        aws --endpoint-url http://seaweedfs:8333 s3 mb s3://mlflow-artifacts;
+        aws --endpoint-url http://seaweedfs:8333 s3 mb s3://data;
+        echo 'Завантажуємо transactions.csv в SeaweedFS...';
+        aws --endpoint-url http://seaweedfs:8333 s3 cp /tmp/data/transactions.csv s3://data/transactions.csv;
+        echo 'Ініціалізацію завершено!';
+        "
+      depends_on:
+        - seaweedfs
+
+  # --- METADATA DATABASE ---
+  postgres:
+    image: postgres:15-alpine
+    container_name: mlflow_postgres
+    environment:
+      POSTGRES_DB: mlflow_db
+      POSTGRES_USER: mlflow_user
+      POSTGRES_PASSWORD: mlflow_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  # --- MLFLOW TRACKING SERVER ---
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.16.0
+    container_name: mlflow_server
+    ports:
+      - "5000:5000"
+    environment:
+      AWS_ACCESS_KEY_ID: "weedadmin"
+      AWS_SECRET_ACCESS_KEY: "weedadmin123"
+      MLFLOW_S3_ENDPOINT_URL: "http://seaweedfs:8333"
+      MLFLOW_S3_IGNORE_TLS: "true"
+    command: sh -c "pip install --no-cache-dir psycopg2-binary && mlflow server --backend-store-uri postgresql://mlflow_user:mlflow_password@postgres:5432/mlflow_db --default-artifact-root s3://mlflow-artifacts/ --host 0.0.0.0 --port 5000"
+    depends_on:
+      - postgres
+      - seaweedfs-init
+    restart: always
+
+volumes:
+  postgres_data:
