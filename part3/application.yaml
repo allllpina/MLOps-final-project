@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fraud-detector
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: "http://gitea-http.gitea.svc.cluster.local:3000/gitops-admin/mlops-deploy.git"
+    targetRevision: HEAD
+    path: "manifests"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: "default"
