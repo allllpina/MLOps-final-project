@@ -1,0 +1,38 @@
+services:
+  app:
+    build: ./app
+    container_name: fraud-app
+    ports:
+      - "8085:8085"
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    # Lab container's /etc/resolv.conf has ndots:5 and a cluster.local
+    # search domain. Without ndots:1, single-label names like `app`
+    # are first tried as `app.<lab-namespace>.svc.cluster.local`,
+    # which resolves to an unrelated pod IP and breaks the scrape.
+    dns_search:
+      - "."
+    depends_on:
+      - app
+
+  grafana:
+    image: grafana/grafana:13.1.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    # Same ndots:1 reason as prometheus: the data source URL
+    # `http://prometheus:9090` must resolve via Docker's embedded
+    # DNS, not via the lab container's cluster.local search domain.
+    dns_search:
+      - "."
+    depends_on:
+      - prometheus
